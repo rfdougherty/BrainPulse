@@ -12,20 +12,21 @@
 #include <MindSet.h>
 #include <SSD1306.h>
 #include <Flash.h>
+#include <fix_fft.h>
 
 #define VERSION "0.5"
 
 #define DEFAULT_REFRESH_INTERVAL 3
 
 // Sample interval is ~1.95ms (1000/512)
-#define FLICKTICS 64
-const byte flickPeriod = FLICKTICS;
-byte flickCount;
-const unsigned long flickDutyMs = 20;
-unsigned long flickDutyStartMs;
+#define FFTWIN 128
 unsigned long dataReadyMicros;
-byte repCount;
-long buffer[FLICKTICS];
+byte imag_buffer[FFTWIN];
+// We need a circular buffer to implement our running window. The buffer
+// must always have the current window available as a contiguous block. The
+// fastest way to do that is to maintain a buffer that is twice as big, with
+// two sequential copies of the data. [MORE HERE]
+byte data_buffer[FFTWIN*2];
 
 
 #if defined(__AVR_AT90USB1286__)
@@ -141,7 +142,6 @@ void loop() {
               g_mindSet.errorRate()>>5, min(g_mindSet.attention(),99), min(g_mindSet.meditation(),99), g_mindSet.gamma1()>>5, g_mindSet.gamma2()>>5, diffMillis);
     repCount = 0;
     lastDataMicros = dataReadyMicros;
-    refreshErpDisplay(stringBuffer);
     for(byte i=0; i<flickPeriod; i++){
       // bit-shift division, with rounding:
       Serial << ((buffer[i]+4)>>3) << F(",");
