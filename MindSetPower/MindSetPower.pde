@@ -26,6 +26,32 @@ byte imag_buffer[FFTWIN];
 // must always have the current window available as a contiguous block. The
 // fastest way to do that is to maintain a buffer that is twice as big, with
 // two sequential copies of the data. [MORE HERE]
+// E.g., for a 3-element buffer, ("^^^" denotes the contiguous block):
+// 1 2 3 1 2 3
+//       ^ ^ ^
+// 4 2 3 4 2 3
+//   ^ ^ ^
+// 4 5 3 4 5 3
+//     ^ ^ ^
+// 4 5 6 4 5 6
+//       ^ ^ ^
+// 7 5 6 7 5 6
+//   ^ ^ ^
+// 7 8 6 7 8 6
+//     ^ ^ ^
+// 7 8 9 7 8 9
+//       ^ ^ ^
+// ...
+// For buffer size n (n=3 here):
+// // initialize buffer with old data (or zeros)
+// for(i=0; i<n; i++){ buff[i] = data[i]; buff[i+n] = data[i]; }
+// curBlockPtr = 1
+// while(true){
+//   buff[curBlockPtr-1] = newData; 
+//   buff[curBlockPtr-1+n] = newData;
+//   DO SOMETHING WITH &(buff[curBlockPtr]) HERE
+//   curBlockPtr++; if(curBlockPtr>n) curBlockPtr=1;
+// }
 byte data_buffer[FFTWIN*2];
 
 
