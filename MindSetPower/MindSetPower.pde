@@ -19,9 +19,9 @@
 #define DEFAULT_REFRESH_INTERVAL 3
 
 // Sample interval is ~1.95ms (1000/512)
-#define FFTWIN 128
+#define FFTWINBITS 6
+#define FFTWIN (1<<FFTWINBITS)
 unsigned long dataReadyMicros;
-byte imag_buffer[FFTWIN];
 // We need a circular buffer to implement our running window. The buffer
 // must always have the current window available as a contiguous block. The
 // fastest way to do that is to maintain a buffer that is twice as big, with
@@ -45,14 +45,17 @@ byte imag_buffer[FFTWIN];
 // For buffer size n (n=3 here):
 // // initialize buffer with old data (or zeros)
 // for(i=0; i<n; i++){ buff[i] = data[i]; buff[i+n] = data[i]; }
-// curBlockPtr = 1
+// curBufferIndex = 1
 // while(true){
-//   buff[curBlockPtr-1] = newData; 
-//   buff[curBlockPtr-1+n] = newData;
-//   DO SOMETHING WITH &(buff[curBlockPtr]) HERE
-//   curBlockPtr++; if(curBlockPtr>n) curBlockPtr=1;
+//   buff[curBufferIndex-1] = newData; 
+//   buff[curBufferIndex-1+n] = newData;
+//   DO SOMETHING WITH &(buff[curBufferIndex]) HERE
+//   curBufferIndex++; if(curBufferIndex>n) curBufferIndex=1;
 // }
-byte data_buffer[FFTWIN*2];
+int gDataBuffer[FFTWIN*2];
+int gRealBuffer[FFTWIN];
+int gImagBuffer[FFTWIN];
+int gCurBufferIndex;
 
 
 #if defined(__AVR_AT90USB1286__)
@@ -119,6 +122,9 @@ void setup() {
   
   oled.ssd1306_init(SSD1306_SWITCHCAPVCC);
   oled.display(); // show splashscreen
+  for(int i=0; i<FFTWIN*2; i++)
+    gDataBuffer[i] = 0; 
+  gCurBufferIndex = 1;
   
   for(int i=0; i<255; i+=2){
     analogWrite(LED_RED, i);
@@ -188,27 +194,54 @@ void dataReady() {
   //  analogWrite(LED_RED, g_mindSet.attention()*2);
   //if(g_mindSet.errorRate()<127 && g_mindSet.meditation()>0)
   //  analogWrite(LED_BLU, g_mindSet.meditation()*2);
-     
+  
+  dataReadyMicros = micros();
+  
   if(g_mindSet.errorRate() == 0)
     digitalWrite(LED_ERR, HIGH);
   else
     digitalWrite(LED_ERR, LOW);
   
-  buffer[flickCount] += g_mindSet.raw();
+  // MindSet raw values are in the range [-2048,2047]
+  gCurDataBuffer[gCurBufferIndex-1] = (byte)(g_mindSet.raw()>>4); 
+  gCurDataBuffer[gCurBufferIndex-1+FFTWIN] = gCurDataBuffer[gCurBufferIndex-1];
+
+  // Do the FFT
+  // FFT result length is half the input data length (e.g., 64 samples in => 32 bins out).  
+  // The first bin cannot be used, so in reality our result is 31 bins.
+  //
+  // The maximum frequency we can measure is half of the sampling rate (Nyquist)
+  // so if we sample at 256Hz our maximum frequency is 128Hz.
+  // So if we have 32 bins covering 128Hz, each bin represents 4Hz range, and the 
+  // lowest bin (bin 1) is 4Hz - 8Hz
+  //  0: DC                     // 16:  64 -  68 Hz
+  //  1:   4 -   8 Hz           // 17:  68 -  72 Hz
+  //  2:   8 -  12 Hz           // 18:  72 -  76 Hz
+  //  3:  12 -  16 Hz           // 19:  76 -  80 Hz
+  //  4:  16 -  20 Hz           // 20:  80 -  84 Hz
+  //  5:  20 -  24 Hz           // 21:  84 -  88 Hz
+  //  6:  24 -  28 Hz           // 22:  88 -  92 Hz
+  //  7:  28 -  32 Hz           // 23:  92 -  96 Hz
+  //  8:  32 -  36 Hz           // 24:  96 - 100 Hz
+  //  9:  36 -  40 Hz           // 25: 100 - 104 Hz
+  // 10:  40 -  44 Hz           // 26: 104 - 108 Hz
+  // 11:  44 -  48 Hz           // 27: 108 - 112 Hz
+  // 12:  48 -  52 Hz           // 28: 112 - 116 Hz
+  // 13:  52 -  56 Hz           // 29: 116 - 120 Hz
+  // 14:  56 -  60 Hz           // 30: 120 - 124 Hz
+  // 15:  60 -  64 Hz           // 31: 124 - 128 Hz
+  memset(gImagBuffer,0);
+  memcpy(&(gDataBuffer[gCurBufferIndex]), gRealBuffer);
+  fix_fft(gRealBuffer, gImagBuffer, FFTWINBITS);
+  // Compute the gamma band power
+  int gammaIndex = 10;
+  int gammaPower = isqrt((unsigned long)(gRealBuffer[gammaIndex] * gRealBuffer[gammaIndex])
+                         (unsigned long)(gImagBuffer[gammaIndex] * gImagBuffer[gammaIndex]));
   
-  dataReadyMicros = micros();
- 
-  flickCount++;
-  if(flickCount>=flickPeriod){
-    flickCount = 0;
-    repCount++;
-  }
-  if(flickCount==0){
-    analogWrite(LED_RED, 255);
-    analogWrite(LED_GRN, 255);
-    analogWrite(LED_BLU, 255);
-    flickDutyStartMs = millis();
-  }
+  gCurBufferIndex++;
+  if(gCurBufferIndex>n) 
+    gCurBufferIndex = 1;
+
   refreshDisplay();
 }
 
